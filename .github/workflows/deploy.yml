@@ -40,10 +40,37 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # --base=/zarb2/ sets the correct asset base path for GitHub Pages
-      # (applied at build time so the local dev/preview build is unaffected)
+      # Build with a RELATIVE base path (./) so every asset is referenced as
+      # ./assets/... and resolves correctly under https://mahmunirmoon.github.io/zarb2/
+      # (an absolute base like "/" would point to the domain root and 404,
+      # leaving a blank page). Applied at build time so local builds are unaffected.
       - name: Build
-        run: npm run build -- --base=/zarb2/
+        run: npm run build -- --base=./
+
+      # Print the built HTML, then verify that every asset referenced by
+      # dist/index.html actually exists in dist and uses a relative ./assets/
+      # path. This prevents silent blank-page deploys (404'd bundles).
+      - name: Verify built assets
+        run: |
+          echo "---- dist/index.html ----"
+          cat dist/index.html
+          echo "---- dist files ----"
+          find dist -type f
+          if grep -q '="/assets/' dist/index.html; then
+            echo "::error::dist/index.html references absolute /assets/ paths — the base flag was not applied!"
+            exit 1
+          fi
+          node -e "
+          const fs = require('fs');
+          const html = fs.readFileSync('dist/index.html', 'utf8');
+          const refs = [...html.matchAll(/(?:src|href)=\"(\.\/assets\/[^\"]+)\"/g)].map((m) => m[1]);
+          if (refs.length === 0) { console.error('::error::No ./assets/ references found in dist/index.html'); process.exit(1); }
+          for (const r of refs) {
+            const p = 'dist/' + r.replace(/^\.\//, '');
+            if (!fs.existsSync(p)) { console.error('::error::Referenced asset missing from dist: ' + p); process.exit(1); }
+            console.log('asset OK: ' + p);
+          }
+          "
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
