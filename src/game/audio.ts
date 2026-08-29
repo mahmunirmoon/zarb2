@@ -1,22 +1,42 @@
-// مدیر صدا: موسیقی پس‌زمینه‌ی کودکانه (ملودی شاد با WebAudio) + افکت‌های صوتی
+// مدیر صدا: موسیقی پس‌زمینه‌ی کودکانه (ملودی شاد و بلندتر با WebAudio) + افکت‌های صوتی
 // تشویق (دست زدن)، بوق خطا، زنگ درست، فانفار
 
 const C3 = 130.81, E3 = 164.81, F3 = 174.61, G3 = 196.0, A3 = 220.0;
 const C4 = 261.63, D4 = 293.66, E4 = 329.63, F4 = 349.23, G4 = 392.0, A4 = 440.0, B4 = 493.88;
-const C5 = 523.25, D5 = 587.33, E5 = 659.25, G5 = 783.99;
+const C5 = 523.25, D5 = 587.33, E5 = 659.25, F5 = 698.46, G5 = 783.99;
+const F2 = 87.31, G2 = 98.0, A2 = 110.0;
 
-// ملودی شاد کودکانه (نت‌های هشتم؛ null = سکوت)
-const MELODY: (number | null)[] = [
-  C4, E4, G4, E4, C5, E4, G4, E4,
-  A4, null, G4, null, E4, null, C4, null,
-  D4, F4, A4, F4, D5, F4, A4, F4,
-  G4, null, B4, null, D5, null, G4, null,
-  C4, E4, G4, C5, B4, G4, E4, G4,
-  A4, C5, A4, F4, E4, C4, E4, G4,
-  F4, A4, G4, B4, C5, null, E5, null,
-  G5, null, E5, null, C5, null, null, null,
+/** درجه‌های گام دو ماژور → فرکانس (۱ = دو۴) */
+const DEG: Record<number, number> = {
+  1: C4, 2: D4, 3: E4, 4: F4, 5: G4, 6: A4, 7: B4,
+  8: C5, 9: D5, 10: E5, 11: F5, 12: G5,
+};
+
+/**
+ * ملودی شاد کودکانه — ۸ عبارت ۱۶ ضربی (۱۲۸ هشتم ≈ ۳۳ ثانیه تا تکرار)
+ * صفر = سکوت؛ بقیه درجه‌های گام
+ */
+const PHRASES: number[][] = [
+  [3, 3, 5, 3, 8, 0, 5, 0, 3, 5, 8, 5, 3, 0, 0, 0],
+  [4, 4, 6, 4, 9, 0, 6, 0, 4, 6, 9, 6, 5, 0, 0, 0],
+  [5, 5, 7, 5, 10, 0, 7, 0, 5, 7, 10, 7, 8, 0, 0, 0],
+  [8, 8, 10, 8, 12, 0, 10, 0, 9, 8, 6, 5, 3, 0, 0, 0],
+  [12, 10, 8, 10, 9, 8, 6, 8, 6, 8, 9, 8, 5, 0, 0, 0],
+  [3, 5, 6, 8, 9, 8, 6, 5, 6, 5, 4, 5, 3, 0, 0, 0],
+  [8, 9, 10, 12, 10, 9, 8, 6, 8, 9, 8, 6, 5, 0, 0, 0],
+  [6, 6, 8, 6, 5, 4, 3, 4, 5, 6, 5, 4, 3, 0, 0, 0],
 ];
-const BASS: number[] = [C3, A3, F3, G3, C3, F3, G3, C3];
+const MELODY: (number | null)[] = [];
+for (const p of PHRASES) for (const d of p) MELODY.push(d === 0 ? null : DEG[d]);
+
+/** ریشه‌ی آکورد هر میزان (۳۲ میزان = ۱۲۸ هشتم) */
+const CHORDS: number[] = [
+  C3, C3, F2, F2, C3, C3, G2, G2,
+  C3, C3, F2, F2, C3, G2, C3, C3,
+  A2, A2, F2, F2, C3, C3, G2, G2,
+  A2, A2, F2, F2, C3, G2, C3, C3,
+];
+
 const BPM = 118;
 const EIGHTH = 60 / BPM / 2;
 
@@ -39,9 +59,22 @@ class AudioManager {
       this.master = this.ctx.createGain();
       this.master.gain.value = this.muted ? 0 : 1;
       this.master.connect(this.ctx.destination);
+      // باس موسیقی بلندتر از قبل
       this.musicBus = this.ctx.createGain();
-      this.musicBus.gain.value = 0.16;
+      this.musicBus.gain.value = 0.42;
       this.musicBus.connect(this.master);
+      // اکوی ملایم برای پرحجم‌تر شدن موسیقی
+      const delay = this.ctx.createDelay(1);
+      delay.delayTime.value = EIGHTH * 1.5;
+      const fb = this.ctx.createGain();
+      fb.gain.value = 0.3;
+      const wet = this.ctx.createGain();
+      wet.gain.value = 0.3;
+      this.musicBus.connect(delay);
+      delay.connect(fb);
+      fb.connect(delay);
+      delay.connect(wet);
+      wet.connect(this.master);
       this.sfxBus = this.ctx.createGain();
       this.sfxBus.gain.value = 0.9;
       this.sfxBus.connect(this.master);
@@ -123,16 +156,17 @@ class AudioManager {
       const note = MELODY[idx];
       const t = this.nextTime;
       if (note !== null) {
-        this.tone(note, t, EIGHTH * 0.92, { type: "triangle", gain: 0.5, bus: this.musicBus });
-        this.tone(note * 2, t, EIGHTH * 0.6, { type: "sine", gain: 0.08, bus: this.musicBus });
+        // ملودی اصلی + یک لایه‌ی اکتاو بالاتر برای درخشش بیشتر
+        this.tone(note, t, EIGHTH * 0.95, { type: "triangle", gain: 0.55, bus: this.musicBus });
+        this.tone(note * 2, t, EIGHTH * 0.6, { type: "sine", gain: 0.13, bus: this.musicBus });
       }
-      // بیس روی ضرب‌ها
-      if (idx % 4 === 0) {
-        const bass = BASS[Math.floor(idx / 8) % BASS.length];
-        this.tone(bass, t, EIGHTH * 3.4, { type: "sine", gain: 0.42, bus: this.musicBus });
-      }
-      // تیک شاد (پرکاشن سبک)
-      this.noise(t, 0.03, idx % 2 === 0 ? 6500 : 4800, 0.05, 2);
+      // بیس: ریشه‌ی آکورد روی ضرب اول و پنجمِ هر میزان
+      const bar = Math.floor(idx / 4);
+      const root = CHORDS[bar % CHORDS.length];
+      if (idx % 4 === 0) this.tone(root, t, EIGHTH * 3.6, { type: "sine", gain: 0.5, bus: this.musicBus });
+      if (idx % 4 === 2) this.tone(root * 1.5, t, EIGHTH * 1.2, { type: "triangle", gain: 0.22, bus: this.musicBus });
+      // شیکر سبک روی هشتم‌ها
+      if (idx % 2 === 0) this.noise(t, 0.03, idx % 4 === 0 ? 6800 : 4800, 0.05, 2);
       this.nextTime += EIGHTH;
       this.step++;
     }
@@ -162,15 +196,6 @@ class AudioManager {
     this.tone(155, t, 0.4, { type: "square", gain: 0.14, slideTo: 66 });
   }
 
-  levelUp() {
-    this.ensure();
-    if (!this.ctx) return;
-    const t = this.ctx.currentTime;
-    [G4, C5, E5, G5, C5 * 2].forEach((f, i) =>
-      this.tone(f, t + i * 0.1, 0.25, { type: "triangle", gain: 0.3 })
-    );
-  }
-
   fanfare() {
     this.ensure();
     if (!this.ctx) return;
@@ -180,6 +205,8 @@ class AudioManager {
     );
     [C4, G4].forEach((f) => this.tone(f, t + 0.55, 1.1, { type: "triangle", gain: 0.22 }));
     this.tone(C5 * 2, t + 0.55, 1.0, { type: "triangle", gain: 0.2 });
+    this.tone(F5, t + 0.72, 0.9, { type: "triangle", gain: 0.16 });
+    void E3; void F3; void A3; // ثابت‌های رزرو گام
   }
 
   /** صدای دست زدن — چند dozen کف با نویز فیلترشده */
