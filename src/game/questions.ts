@@ -42,10 +42,8 @@ const pickDistractors = (answer: number, pool: number[]): number[] => {
   return picked;
 };
 
-/** سؤال جدول ضرب: یک‌رقمی × یک‌رقمی */
-const makeBasic = (level: number): Question => {
-  const a = rand(3, 9);
-  const b = rand(3, 9);
+/** سؤال جدول ضرب با زوج مشخص: یک‌رقمی × یک‌رقمی */
+const makeBasicPair = (a: number, b: number, level: number): Question => {
   const answer = a * b;
   const pool = [
     answer + a,
@@ -71,9 +69,9 @@ const makeBasic = (level: number): Question => {
 
 /** سؤال ضرب فرآیندی: یک‌رقمی × دورقمی با نمایش حاصل‌ضرب‌های جزئی و جای خالی برای جمع */
 const makeProcess = (level: number, tensMax: number): Question => {
-  const a = level === 3 ? rand(4, 9) : rand(2, 7);
-  const tens = rand(level === 3 ? 3 : 1, tensMax);
-  const ones = rand(level === 3 ? 3 : 2, 9);
+  const a = rand(4, 9);
+  const tens = rand(3, tensMax);
+  const ones = rand(3, 9);
   const b = tens * 10 + ones;
   const p1 = a * tens * 10; // a × دهگان
   const p2 = a * ones; // a × یکان
@@ -102,26 +100,36 @@ const makeProcess = (level: number, tensMax: number): Question => {
   };
 };
 
-const shuffleLevel = (qs: Question[]): Question[] => {
-  // جابجایی سؤال‌ها فقط داخل هر مرحله تا سختی پلکانی حفظ شود
-  const groups = new Map<number, Question[]>();
-  qs.forEach((q) => {
-    const g = groups.get(q.level) ?? [];
-    g.push(q);
-    groups.set(q.level, g);
-  });
-  const out: Question[] = [];
-  [...groups.keys()].sort((x, y) => x - y).forEach((lv) => out.push(...shuffle(groups.get(lv)!)));
-  return out;
-};
-
-/** ۱۰ سؤال: ۴ تا جدول ضرب، ۳ تا فرآیندی، ۳ تا چالش فرآیندی سخت‌تر */
-export const buildQuestions = (): Question[] => {
+/**
+ * ساخت ۱۰ سؤال بر اساس لول انتخابی دانش‌آموز
+ * - لول ۱ (آسان): ضرب‌های کوچک ۲ تا ۵ در ۲ تا ۹ — بدون زوج تکراری
+ * - لول ۲ (متوسط): جدول ضرب کامل ۳ تا ۹ — بدون زوج تکراری
+ * - لول ۳ (سخت): ضرب فرآیندی یک‌رقمی × دورقمی
+ */
+export const buildQuestions = (level: 1 | 2 | 3): Question[] => {
   const qs: Question[] = [];
-  for (let i = 0; i < 4; i++) qs.push(makeBasic(1));
-  for (let i = 0; i < 3; i++) qs.push(makeProcess(2, 5));
-  for (let i = 0; i < 3; i++) qs.push(makeProcess(3, 7));
-  return shuffleLevel(qs);
+  if (level === 1) {
+    const pairs: [number, number][] = [];
+    for (let a = 2; a <= 5; a++) for (let b = 2; b <= 9; b++) if (a <= b) pairs.push([a, b]);
+    for (const [a, b] of shuffle(pairs).slice(0, 10)) qs.push(makeBasicPair(a, b, level));
+  } else if (level === 2) {
+    const pairs: [number, number][] = [];
+    for (let a = 3; a <= 9; a++) for (let b = 3; b <= 9; b++) if (a <= b) pairs.push([a, b]);
+    for (const [a, b] of shuffle(pairs).slice(0, 10)) qs.push(makeBasicPair(a, b, level));
+  } else {
+    const used = new Set<string>();
+    let guard = 0;
+    while (qs.length < 10 && guard < 500) {
+      const q = makeProcess(level, 7);
+      const key = `${q.a}x${q.b}`;
+      if (!used.has(key)) {
+        used.add(key);
+        qs.push(q);
+      }
+      guard++;
+    }
+  }
+  return shuffle(qs);
 };
 
 /* ---------- تبدیل اعداد به رقم فارسی ---------- */

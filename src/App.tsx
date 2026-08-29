@@ -8,19 +8,20 @@ import {
 import { audio } from "./game/audio";
 import { buildQuestions, toFa, type Question } from "./game/questions";
 
-type Phase = "start" | "playing" | "interlude" | "result";
+type Phase = "start" | "select" | "playing" | "result";
 interface Feedback { chosen: number | null; ok: boolean; timedOut?: boolean }
 interface Popup { id: number; text: string; x: number; y: number; kind: "good" | "bad" | "warn" }
 
+/* ---------- لول‌ها ---------- */
 const LEVELS = [
-  { id: 1, name: "جدول ضرب", desc: "ضرب‌های یک‌رقمی را حساب کن!", time: 35, color: "#4cc9f0", count: 4 },
-  { id: 2, name: "ضرب فرآیندی", desc: "خرد کن، ضرب کن، خودش جمع کن!", time: 55, color: "#ff5d8f", count: 3 },
-  { id: 3, name: "چالش ستاره‌ها", desc: "فرآیندیِ سخت‌تر برای قهرمان‌ها!", time: 45, color: "#9b5de5", count: 3 },
-];
+  { id: 1, name: "آسان", tagline: "ضرب‌های کوچک و راحت", desc: "ضرب‌های ۲ تا ۵", time: 25, color: "#3ddc97", stars: 1, tilt: -2.5 },
+  { id: 2, name: "متوسط", tagline: "جدول ضرب کامل", desc: "ضرب‌های ۳ تا ۹", time: 18, color: "#ff9f45", stars: 2, tilt: 1.5 },
+  { id: 3, name: "سخت", tagline: "ضرب فرآیندی", desc: "یک‌رقمی × دورقمی", time: 45, color: "#9b5de5", stars: 3, tilt: -1.5 },
+] as const;
 const TOTAL = 10;
 const BONUS = 50;
-const levelOf = (i: number) => (i < 4 ? 0 : i < 7 ? 1 : 2);
 const fmtScore = (n: number) => (n < 0 ? `−${toFa(Math.abs(n))}` : toFa(n));
+const readBest = (levelId: number) => Number(localStorage.getItem(`zarb-best-${levelId}`) ?? 0) || 0;
 
 const CHOICE_STYLE = [
   { bg: "bg-ocean", text: "text-white" },
@@ -30,11 +31,23 @@ const CHOICE_STYLE = [
 ];
 const CHOICE_LABEL = ["الف", "ب", "ج", "د"];
 
+/** جمله‌ی سازنده — پایین همه‌ی صفحه‌ها */
+const CreditFooter = () => (
+  <p className="relative z-10 mx-auto mt-8 mb-3 w-fit max-w-[92vw] rounded-full border-[3px] border-ink bg-paper/95 px-5 py-2 text-center text-[13px] font-bold leading-6 text-ink-soft shadow-[3px_4px_0_rgba(51,48,107,0.18)] sm:text-sm">
+    این اولین برنامه ساخته شده توسط <span className="font-display text-base text-candy sm:text-lg">آوینا</span> از کلاس{" "}
+    <span className="font-display text-base text-grape sm:text-lg">خانم دکتر ماه منیر آقایی</span> است{" "}
+    <HeartIcon size={14} className="inline-block text-candy" />
+  </p>
+);
+
 export default function App() {
   const [phase, setPhase] = useState<Phase>("start");
   const [inputName, setInputName] = useState(() => localStorage.getItem("zarb-name") ?? "");
   const [name, setName] = useState("");
   const [nameError, setNameError] = useState(false);
+  const [levelIdx, setLevelIdx] = useState(0);
+  const [bests, setBests] = useState<number[]>(() => LEVELS.map((l) => readBest(l.id)));
+  const [newRecord, setNewRecord] = useState(false);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [qIndex, setQIndex] = useState(0);
   const [score, setScore] = useState(0);
@@ -42,7 +55,7 @@ export default function App() {
   const [results, setResults] = useState<boolean[]>([]);
   const [streak, setStreak] = useState(0);
   const [bestStreak, setBestStreak] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(LEVELS[0].time);
+  const [timeLeft, setTimeLeft] = useState<number>(LEVELS[0].time);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [paused, setPaused] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -50,12 +63,12 @@ export default function App() {
   const [shakeOn, setShakeOn] = useState(false);
 
   const feedbackRef = useRef<Feedback | null>(null);
-  const timeRef = useRef(LEVELS[0].time);
+  const timeRef = useRef<number>(LEVELS[0].time);
   const advanceRef = useRef<number | null>(null);
   const shakeRef = useRef<number | null>(null);
   const popupId = useRef(0);
 
-  const level = levelOf(qIndex);
+  const level = LEVELS[levelIdx];
   const q = questions[qIndex];
 
   /* ---------- ابزارها ---------- */
@@ -71,29 +84,25 @@ export default function App() {
     shakeRef.current = window.setTimeout(() => setShakeOn(false), 550);
   };
 
-  const resetTimer = (lv: number) => {
-    timeRef.current = LEVELS[lv].time;
-    setTimeLeft(LEVELS[lv].time);
-  };
-
-  /* ---------- شروع بازی ---------- */
-  const startGame = (nm: string) => {
+  /* ---------- شروع یک لول ---------- */
+  const startLevel = (idx: number) => {
     audio.ensure();
     audio.startMusic();
     audio.click();
-    localStorage.setItem("zarb-name", nm);
-    setName(nm);
-    setQuestions(buildQuestions());
+    setLevelIdx(idx);
+    setQuestions(buildQuestions(LEVELS[idx].id));
     setQIndex(0);
     setScore(0);
     setBonus(0);
     setResults([]);
     setStreak(0);
     setBestStreak(0);
+    setNewRecord(false);
     setPaused(false);
     feedbackRef.current = null;
     setFeedback(null);
-    resetTimer(0);
+    timeRef.current = LEVELS[idx].time;
+    setTimeLeft(LEVELS[idx].time);
     setPhase("playing");
   };
 
@@ -106,7 +115,11 @@ export default function App() {
       window.setTimeout(() => setNameError(false), 700);
       return;
     }
-    startGame(nm);
+    audio.ensure();
+    audio.click();
+    localStorage.setItem("zarb-name", nm);
+    setName(nm);
+    setPhase("select");
   };
 
   /* ---------- جلو رفتن ---------- */
@@ -121,13 +134,11 @@ export default function App() {
           setBonus(BONUS);
           setScore((s) => s + BONUS);
         }
-      } else if (levelOf(fromIndex + 1) !== levelOf(fromIndex)) {
-        setPhase("interlude");
-        audio.levelUp();
       } else {
         const ni = fromIndex + 1;
         setQIndex(ni);
-        resetTimer(levelOf(ni));
+        timeRef.current = LEVELS[levelIdx].time;
+        setTimeLeft(LEVELS[levelIdx].time);
       }
     }, 1800);
   };
@@ -176,14 +187,6 @@ export default function App() {
     scheduleNext(qIndex, newResults);
   };
 
-  const continueInterlude = () => {
-    audio.click();
-    const ni = qIndex + 1;
-    setQIndex(ni);
-    resetTimer(levelOf(ni));
-    setPhase("playing");
-  };
-
   /* ---------- تایمر سؤال ---------- */
   useEffect(() => {
     if (phase !== "playing" || paused || feedback) return;
@@ -217,7 +220,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, paused, qIndex, questions]);
 
-  /* ---------- پایان بازی: تشویق و فانفار ---------- */
+  /* ---------- پایان بازی: تشویق، فانفار و ذخیره‌ی رکورد ---------- */
   useEffect(() => {
     if (phase !== "result") return;
     const perfect = results.length === TOTAL && results.every(Boolean);
@@ -228,6 +231,12 @@ export default function App() {
       window.setTimeout(() => fx.confetti(160), 900);
     } else {
       fx.confetti(70);
+    }
+    const prevBest = readBest(LEVELS[levelIdx].id);
+    if (score > prevBest) {
+      localStorage.setItem(`zarb-best-${LEVELS[levelIdx].id}`, String(score));
+      setBests(LEVELS.map((l) => readBest(l.id)));
+      setNewRecord(true);
     }
   }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -249,8 +258,7 @@ export default function App() {
   };
 
   const correctCount = results.filter(Boolean).length;
-  const timerMax = LEVELS[level].time;
-  const timerPct = Math.max(0, (timeLeft / timerMax) * 100);
+  const timerPct = Math.max(0, (timeLeft / level.time) * 100);
   const timerColor = timerPct > 50 ? "#3ddc97" : timerPct > 25 ? "#ffc53d" : "#ff5d8f";
 
   /* ================================================================ */
@@ -286,6 +294,18 @@ export default function App() {
         />
       )}
 
+      {/* ================= انتخاب لول ================= */}
+      {phase === "select" && (
+        <SelectScreen
+          name={name}
+          bests={bests}
+          onPick={(i) => startLevel(i)}
+          onRename={() => { audio.click(); setPhase("start"); }}
+          muted={muted}
+          onMute={toggleMute}
+        />
+      )}
+
       {/* ================= بازی ================= */}
       {phase === "playing" && q && (
         <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-3xl flex-col px-3 pb-10 pt-3 sm:px-5">
@@ -297,8 +317,11 @@ export default function App() {
               </span>
               <div className="leading-tight">
                 <div className="font-display text-lg text-ink">{name}</div>
-                <div className="text-[11px] font-bold text-ink-soft">
-                  مرحله {toFa(LEVELS[level].id)}: {LEVELS[level].name}
+                <div className="flex items-center gap-1 text-[11px] font-bold text-ink-soft">
+                  لول {level.name}
+                  <span className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-black text-white" style={{ background: level.color }}>
+                    {Array.from({ length: level.stars }).map((_, i) => <StarIcon key={i} size={9} />)}
+                  </span>
                 </div>
               </div>
             </div>
@@ -415,27 +438,18 @@ export default function App() {
         </div>
       )}
 
-      {/* ================= میان‌پرده‌ی مرحله ================= */}
-      {phase === "interlude" && q && (
-        <Interlude
-          doneLevel={LEVELS[levelOf(qIndex)]}
-          nextLevel={LEVELS[levelOf(qIndex + 1)]}
-          correctInLevel={results.slice(qIndex - LEVELS[levelOf(qIndex)].count + 1, qIndex + 1).filter(Boolean).length}
-          levelCount={LEVELS[levelOf(qIndex)].count}
-          onContinue={continueInterlude}
-          name={name}
-        />
-      )}
-
       {/* ================= نتیجه ================= */}
       {phase === "result" && (
         <ResultScreen
           name={name}
+          levelIdx={levelIdx}
           score={score}
           bonus={bonus}
           correct={correctCount}
           bestStreak={bestStreak}
-          onReplay={() => startGame(name)}
+          newRecord={newRecord}
+          onReplay={() => startLevel(levelIdx)}
+          onLevels={() => { audio.click(); setPhase("select"); }}
           onRename={() => { audio.click(); setPhase("start"); }}
         />
       )}
@@ -452,11 +466,11 @@ export default function App() {
               <button onClick={() => { audio.click(); setPaused(false); }} className="btn-candy font-display flex items-center justify-center gap-2 rounded-2xl border-[3px] border-ink bg-mint px-5 py-3 text-2xl text-white shadow-[4px_5px_0_rgba(51,48,107,0.85)]">
                 <PlayIcon size={20} /> ادامه بازی
               </button>
-              <button onClick={() => startGame(name)} className="btn-candy font-display flex items-center justify-center gap-2 rounded-2xl border-[3px] border-ink bg-ocean px-5 py-2.5 text-xl text-white shadow-[4px_5px_0_rgba(51,48,107,0.85)]">
+              <button onClick={() => startLevel(levelIdx)} className="btn-candy font-display flex items-center justify-center gap-2 rounded-2xl border-[3px] border-ink bg-ocean px-5 py-2.5 text-xl text-white shadow-[4px_5px_0_rgba(51,48,107,0.85)]">
                 <RefreshIcon size={20} /> شروع دوباره
               </button>
-              <button onClick={() => { audio.click(); setPaused(false); setPhase("start"); }} className="btn-candy font-display rounded-2xl border-[3px] border-ink bg-paper px-5 py-2.5 text-xl text-ink shadow-[4px_5px_0_rgba(51,48,107,0.85)]">
-                بازگشت به خانه
+              <button onClick={() => { audio.click(); setPaused(false); setPhase("select"); }} className="btn-candy font-display rounded-2xl border-[3px] border-ink bg-paper px-5 py-2.5 text-xl text-ink shadow-[4px_5px_0_rgba(51,48,107,0.85)]">
+                انتخاب لول
               </button>
             </div>
           </div>
@@ -509,7 +523,7 @@ function StartScreen({
       {/* عنوان */}
       <div className="mt-4 text-center">
         <div className="font-display mb-1 inline-flex items-center gap-2 rounded-full border-[3px] border-ink bg-grape px-4 py-1 text-lg text-white shadow-[3px_4px_0_rgba(51,48,107,0.8)]">
-          <MusicIcon size={18} /> ریاضی پایه‌ی سوم • ضرب فرآیندی
+          <MusicIcon size={18} /> ریاضی پایه‌ی سوم • جدول ضرب فرآیندی
         </div>
         <h1 className="font-display wiggle mt-3 text-6xl leading-tight text-ink sm:text-7xl" style={{ textShadow: "4px 5px 0 #ffc53d, 8px 9px 0 rgba(51,48,107,0.25)" }}>
           جشن جدول ضرب
@@ -540,7 +554,7 @@ function StartScreen({
           onClick={onStart}
           className="btn-candy font-display mt-4 flex w-full items-center justify-center gap-2 rounded-2xl border-[3.5px] border-ink bg-candy px-5 py-3.5 text-3xl text-white shadow-[5px_6px_0_rgba(51,48,107,0.85)]"
         >
-          <PlayIcon size={24} /> شروع بازی
+          <PlayIcon size={24} /> انتخاب لول و شروع
         </button>
       </div>
 
@@ -563,70 +577,125 @@ function StartScreen({
           </li>
           <li className="flex items-center gap-2.5">
             <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl border-[2.5px] border-ink bg-ocean text-white"><ClockIcon size={16} /></span>
-            برای هر سؤال یک نوار زمان داری؛ با کلیک، لمس یا کلیدهای ۱ تا ۴ جواب بده.
+            لول خودت را انتخاب کن: آسان، متوسط یا سخت!
           </li>
         </ul>
       </div>
 
       <p className="font-display mt-6 flex items-center gap-1.5 text-lg text-ink-soft">
-        کلاس خانم <span className="text-candy">ماه منیر</span> <HeartIcon size={18} className="text-candy" />
+        کلاس <span className="text-candy">خانم دکتر ماه منیر آقایی</span> <HeartIcon size={18} className="text-candy" />
       </p>
+
+      <CreditFooter />
     </div>
   );
 }
 
-/* ================= میان‌پرده ================= */
-function Interlude({
-  doneLevel, nextLevel, correctInLevel, levelCount, onContinue, name,
+/* ================= صفحه‌ی انتخاب لول ================= */
+function SelectScreen({
+  name, bests, onPick, onRename, muted, onMute,
 }: {
-  doneLevel: (typeof LEVELS)[number];
-  nextLevel: (typeof LEVELS)[number];
-  correctInLevel: number;
-  levelCount: number;
-  onContinue: () => void;
   name: string;
+  bests: number[];
+  onPick: (i: number) => void;
+  onRename: () => void;
+  muted: boolean;
+  onMute: () => void;
 }) {
   return (
-    <div className="relative z-10 mx-auto grid min-h-screen w-full max-w-lg place-items-center px-4">
-      <div className="card-pop relative w-full rounded-3xl border-[4px] border-ink bg-paper p-7 text-center shadow-[10px_12px_0_rgba(51,48,107,0.3)]">
-        <PinDot color={doneLevel.color} size={30} />
-        <div className="font-display inline-block rounded-full border-[3px] border-ink px-4 py-0.5 text-lg text-white" style={{ background: doneLevel.color }}>
-          مرحله {toFa(doneLevel.id)}: {doneLevel.name}
-        </div>
-        <h2 className="font-display mt-3 text-5xl text-ink" style={{ textShadow: "3px 4px 0 #ffc53d" }}>تمام شد!</h2>
-        <p className="font-display mt-2 text-2xl text-ink-soft">
-          {name} جان، از {toFa(levelCount)} سؤال، <span className="text-mint">{toFa(correctInLevel)}</span> تا را درست زدی!
-        </p>
-        <div className="mx-auto my-5 h-2 w-2/3 overflow-hidden rounded-full border-2 border-ink bg-white">
-          <div className="h-full rounded-full" style={{ width: `${(correctInLevel / levelCount) * 100}%`, background: doneLevel.color }} />
-        </div>
-        <div className="rounded-2xl border-[3px] border-dashed border-ink bg-white px-4 py-3">
-          <p className="text-sm font-black text-ink-soft">مرحله‌ی بعد:</p>
-          <p className="font-display text-3xl" style={{ color: nextLevel.color }}>
-            مرحله {toFa(nextLevel.id)}: {nextLevel.name}
-          </p>
-          <p className="mt-1 text-sm font-bold text-ink-soft">{nextLevel.desc}</p>
-        </div>
-        <button onClick={onContinue} className="btn-candy font-display mt-6 flex w-full items-center justify-center gap-2 rounded-2xl border-[3.5px] border-ink bg-mint px-5 py-3.5 text-3xl text-white shadow-[5px_6px_0_rgba(51,48,107,0.85)]">
-          <PlayIcon size={22} /> بزن بریم!
+    <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-4xl flex-col items-center px-4 py-8">
+      <div className="absolute left-4 top-4 flex items-center gap-2">
+        <button onClick={onRename} className="btn-candy font-display flex items-center gap-2 rounded-2xl border-[3px] border-ink bg-paper px-4 py-2 text-lg text-ink shadow-[3px_4px_0_rgba(51,48,107,0.8)]">
+          <PencilIcon size={18} className="text-candy" /> {name}
         </button>
       </div>
+      <button onClick={onMute} className="btn-candy absolute right-4 top-4 grid h-11 w-11 place-items-center rounded-2xl border-[3px] border-ink bg-paper text-ink shadow-[3px_4px_0_rgba(51,48,107,0.8)]" title="صدا">
+        {muted ? <SoundOffIcon size={20} /> : <SoundOnIcon size={20} />}
+      </button>
+
+      <div className="mt-14 text-center sm:mt-8">
+        <div className="font-display inline-flex items-center gap-2 rounded-full border-[3px] border-ink bg-ocean px-4 py-1 text-lg text-white shadow-[3px_4px_0_rgba(51,48,107,0.8)]">
+          <TrophyIcon size={18} /> {name} جان، کدوم لول؟
+        </div>
+        <h2 className="font-display wiggle mt-3 text-5xl text-ink sm:text-6xl" style={{ textShadow: "4px 5px 0 #ffc53d, 8px 9px 0 rgba(51,48,107,0.2)" }}>
+          انتخاب لول بازی
+        </h2>
+        <p className="mt-2 text-base font-bold text-ink-soft">هر لول ۱۰ سؤال دارد؛ روی کارت لول بزن تا شروع شود!</p>
+      </div>
+
+      {/* کارت لول‌ها */}
+      <div className="mt-9 grid w-full grid-cols-1 gap-7 sm:grid-cols-3 sm:gap-5">
+        {LEVELS.map((lv, i) => (
+          <button
+            key={lv.id}
+            onClick={() => onPick(i)}
+            className="btn-candy group relative rounded-3xl border-[4px] border-ink p-6 pt-8 text-center text-white shadow-[8px_10px_0_rgba(51,48,107,0.3)]"
+            style={{ background: lv.color, transform: `rotate(${lv.tilt}deg)` }}
+          >
+            <PinDot color="#fffdf5" size={28} />
+            <Tape color="#33306b" className="-top-2 right-6 rotate-6 opacity-30" />
+
+            {/* ستاره‌های سختی */}
+            <div className="flex items-center justify-center gap-1">
+              {[0, 1, 2].map((s) => (
+                <StarIcon key={s} size={s === 1 ? 26 : 20} className={s < lv.stars ? "text-lemon drop-shadow" : "text-ink/25"} />
+              ))}
+            </div>
+
+            <div className="font-display mt-2 text-5xl leading-none" style={{ textShadow: "3px 3px 0 rgba(51,48,107,0.45)" }}>
+              {lv.name}
+            </div>
+            <div className="font-display mt-1 text-xl opacity-95">{lv.tagline}</div>
+            <div className="mx-auto mt-2 w-fit rounded-full border-[2.5px] border-ink/70 bg-white/25 px-3 py-0.5 text-sm font-black text-ink" style={{ color: "#fffdf5" }}>
+              {lv.desc}
+            </div>
+
+            <div className="mt-4 flex items-center justify-center gap-2 text-sm font-black text-ink" style={{ color: "#fffdf5" }}>
+              <span className="inline-flex items-center gap-1 rounded-xl border-[2.5px] border-ink/70 bg-white/25 px-2.5 py-1">
+                <ClockIcon size={15} /> <span dir="ltr">{toFa(lv.time)}</span> ثانیه برای هر سؤال
+              </span>
+            </div>
+
+            <div className="mt-3 flex items-center justify-center gap-1.5 rounded-2xl border-[3px] border-ink/70 bg-white/90 px-3 py-1.5 text-ink">
+              <TrophyIcon size={17} className="text-tang" />
+              <span className="font-display text-lg">
+                {bests[i] > 0 ? <>رکورد تو: <span dir="ltr">{fmtScore(bests[i])}</span></> : "هنوز رکورد نداری!"}
+              </span>
+            </div>
+
+            <div className="font-display mt-4 inline-flex items-center gap-2 rounded-2xl border-[3px] border-ink bg-paper px-5 py-2 text-2xl text-ink shadow-[3px_4px_0_rgba(51,48,107,0.5)] transition-transform group-hover:scale-105">
+              <PlayIcon size={20} className="text-mint" /> بزن بریم!
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-8 flex items-center gap-2 text-sm font-bold text-ink-soft">
+        <MusicIcon size={16} className="text-grape" />
+        موسیقی شاد هنگام بازی پخش می‌شود — از دکمه‌ی بلندگو می‌توانی قطعش کنی.
+      </div>
+
+      <CreditFooter />
     </div>
   );
 }
 
 /* ================= صفحه‌ی نتیجه ================= */
 function ResultScreen({
-  name, score, bonus, correct, bestStreak, onReplay, onRename,
+  name, levelIdx, score, bonus, correct, bestStreak, newRecord, onReplay, onLevels, onRename,
 }: {
   name: string;
+  levelIdx: number;
   score: number;
   bonus: number;
   correct: number;
   bestStreak: number;
+  newRecord: boolean;
   onReplay: () => void;
+  onLevels: () => void;
   onRename: () => void;
 }) {
+  const lv = LEVELS[levelIdx];
   const perfect = correct === TOTAL;
   const stars = correct >= 10 ? 3 : correct >= 7 ? 2 : correct >= 4 ? 1 : 0;
   const msg = perfect
@@ -647,8 +716,9 @@ function ResultScreen({
             <span className="rounded-full bg-white/90 px-3 py-0.5">همه را درست جواب دادی! ۵۰+ امتیاز ویژه گرفتی!</span>
           </div>
         ) : (
-          <div className="font-display mx-auto inline-block rounded-full border-[3px] border-ink bg-ocean px-5 py-1 text-xl text-white">
+          <div className="font-display mx-auto inline-flex items-center gap-2 rounded-full border-[3px] border-ink px-5 py-1 text-xl text-white" style={{ background: lv.color }}>
             کارت تمام شد!
+            <span className="rounded-full bg-white/90 px-2 py-0.5 text-sm text-ink">لول {lv.name}</span>
           </div>
         )}
 
@@ -668,9 +738,15 @@ function ResultScreen({
         <h2 className="font-display mt-3 text-5xl text-ink" style={{ textShadow: "3px 4px 0 #ffc53d" }}>{name} جان</h2>
         <p className="font-display mt-1 text-2xl text-ink-soft">{msg}</p>
 
+        {newRecord && (
+          <div className="card-pop mx-auto mt-2 w-fit rounded-full border-[3px] border-ink bg-tang px-4 py-1 font-display text-lg text-white shadow-[3px_4px_0_rgba(51,48,107,0.5)]">
+            رکورد جدید در لول {lv.name}!
+          </div>
+        )}
+
         {/* امتیاز */}
-        <div className="mx-auto mt-5 w-full max-w-xs rounded-2xl border-[3.5px] border-ink bg-lemon px-5 py-3 shadow-[4px_5px_0_rgba(51,48,107,0.85)]">
-          <div className="text-sm font-black text-ink-soft">امتیاز نهایی</div>
+        <div className="mx-auto mt-4 w-full max-w-xs rounded-2xl border-[3.5px] border-ink bg-lemon px-5 py-3 shadow-[4px_5px_0_rgba(51,48,107,0.85)]">
+          <div className="text-sm font-black text-ink-soft">امتیاز نهایی — لول {lv.name}</div>
           <div className="font-display text-5xl text-ink" dir="ltr">{fmtScore(score)}</div>
           {bonus > 0 && <div className="font-display text-lg text-candy">شامل ۵۰+ جایزه‌ی کامل‌زدن</div>}
         </div>
@@ -695,7 +771,7 @@ function ResultScreen({
         <div className="relative mx-auto mt-6 inline-block rounded-2xl border-[3px] border-ink bg-white px-6 py-2.5 shadow-[4px_5px_0_rgba(51,48,107,0.25)]">
           <PinDot color="#ff5d8f" size={22} />
           <p className="font-display flex items-center gap-2 text-2xl text-ink">
-            معلم: <span className="text-candy">ماه منیر</span> <HeartIcon size={20} className="text-candy" />
+            معلم: <span className="text-candy">خانم دکتر ماه منیر آقایی</span> <HeartIcon size={20} className="text-candy" />
           </p>
         </div>
 
@@ -704,10 +780,15 @@ function ResultScreen({
           <button onClick={onReplay} className="btn-candy font-display flex flex-1 items-center justify-center gap-2 rounded-2xl border-[3.5px] border-ink bg-candy px-5 py-3 text-2xl text-white shadow-[5px_6px_0_rgba(51,48,107,0.85)]">
             <RefreshIcon size={22} /> بازی دوباره
           </button>
+          <button onClick={onLevels} className="btn-candy font-display flex flex-1 items-center justify-center gap-2 rounded-2xl border-[3.5px] border-ink bg-grape px-5 py-3 text-2xl text-white shadow-[5px_6px_0_rgba(51,48,107,0.85)]">
+            <TrophyIcon size={22} /> لول‌های دیگر
+          </button>
           <button onClick={onRename} className="btn-candy font-display flex flex-1 items-center justify-center gap-2 rounded-2xl border-[3.5px] border-ink bg-ocean px-5 py-3 text-2xl text-white shadow-[5px_6px_0_rgba(51,48,107,0.85)]">
             <PencilIcon size={20} /> تغییر نام
           </button>
         </div>
+
+        <CreditFooter />
       </div>
     </div>
   );
